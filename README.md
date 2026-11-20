@@ -1,5 +1,9 @@
 # Token Launch Radar
 
+[![Make.fun competition](https://make.fun/badge/token-radar-01.svg)](https://make.fun/bounty/token-radar-01)
+[![Make.fun rank](https://make.fun/badge/token-radar-01/jrrrrr9-pogi/Token-Lunch-Radar/rank.svg)](https://make.fun/bounty/token-radar-01)
+[![Make.fun reward](https://make.fun/badge/token-radar-01/jrrrrr9-pogi/Token-Lunch-Radar/reward.svg)](https://make.fun/bounty/token-radar-01)
+
 A live radar for new token launches. It polls a data source, scores each launch with a transparent, explainable model, and displays a ranked dashboard that updates in real time.
 
 Zero dependencies. Requires Node.js 22 or later.
