@@ -1,0 +1,217 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Token Launch Radar</title>
+<style>
+  :root { color-scheme: dark; --bg:#0d1117; --panel:#161b22; --line:#2a313c; --text:#e6edf3; --dim:#8b949e; --a:#3fb950; --b:#d29922; --c:#db6d28; --d:#f85149; }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--text); font:14px/1.4 system-ui,sans-serif; }
+  header { display:flex; flex-wrap:wrap; gap:12px 20px; align-items:center; padding:14px 20px; border-bottom:1px solid var(--line); }
+  h1 { font-size:18px; margin:0; }
+  .status { color:var(--dim); font-size:12px; }
+  .dot { display:inline-block; width:8px; height:8px; border-radius:50%; background:var(--d); margin-right:6px; }
+  .dot.on { background:var(--a); }
+  .controls { display:flex; flex-wrap:wrap; gap:12px; align-items:center; margin-left:auto; }
+  .controls label { color:var(--dim); font-size:12px; display:flex; gap:6px; align-items:center; }
+  select, input[type=search] { background:var(--panel); color:var(--text); border:1px solid var(--line); border-radius:6px; padding:5px 8px; }
+  main { display:grid; grid-template-columns: 1fr 340px; gap:0; min-height:calc(100vh - 62px); }
+  @media (max-width: 900px) { main { grid-template-columns: 1fr; } aside { border-left:0 !important; border-top:1px solid var(--line); } }
+  .tablewrap { overflow:auto; }
+  table { width:100%; border-collapse:collapse; }
+  th, td { padding:8px 10px; text-align:right; white-space:nowrap; border-bottom:1px solid var(--line); }
+  th { position:sticky; top:0; background:var(--bg); color:var(--dim); font-weight:500; font-size:12px; }
+  th:first-child, td:first-child, th:nth-child(2), td:nth-child(2), th:nth-child(3), td:nth-child(3) { text-align:left; }
+  tbody tr { cursor:pointer; }
+  tbody tr:hover, tbody tr.sel { background:var(--panel); }
+  .badge { display:inline-block; min-width:42px; text-align:center; padding:2px 8px; border-radius:10px; font-weight:700; color:#0d1117; }
+  .gA { background:var(--a); } .gB { background:var(--b); } .gC { background:var(--c); } .gD { background:var(--d); }
+  .sym { font-weight:600; } .nm { color:var(--dim); margin-left:6px; font-size:12px; }
+  .up { color:var(--a); } .down { color:var(--d); }
+  .flagcount { color:var(--d); font-weight:600; }
+  aside { border-left:1px solid var(--line); padding:16px; background:var(--panel); }
+  aside h2 { margin:0 0 4px; font-size:16px; }
+  aside h3 { margin:16px 0 6px; font-size:12px; color:var(--dim); text-transform:uppercase; letter-spacing:.05em; }
+  .flag { padding:6px 8px; border-radius:6px; margin-bottom:6px; font-size:13px; border-left:3px solid var(--dim); background:var(--bg); }
+  .flag.high { border-color:var(--d); } .flag.warn { border-color:var(--b); }
+  .factor { display:grid; grid-template-columns: 1fr auto; gap:2px 8px; margin-bottom:8px; font-size:13px; }
+  .bar { grid-column:1 / -1; height:4px; background:var(--bg); border-radius:2px; overflow:hidden; }
+  .bar > i { display:block; height:100%; background:var(--a); }
+  .note { grid-column:1 / -1; color:var(--dim); font-size:12px; }
+  .toasts { position:fixed; right:16px; bottom:16px; display:flex; flex-direction:column; gap:8px; z-index:5; }
+  .toast { background:var(--panel); border:1px solid var(--a); border-radius:8px; padding:8px 12px; max-width:320px; }
+  .disclaimer { color:var(--dim); font-size:11px; margin-top:20px; }
+  a { color:#58a6ff; }
+  .empty { padding:40px; text-align:center; color:var(--dim); }
+</style>
+</head>
+<body>
+<header>
+  <h1>Token Launch Radar</h1>
+  <span class="status"><span class="dot" id="dot"></span><span id="statusText">connecting...</span></span>
+  <div class="controls">
+    <label>Chain <select id="chain"><option value="">All</option></select></label>
+    <label>Min score <input type="range" id="minScore" min="0" max="100" value="0"><span id="minScoreVal">0</span></label>
+    <label><input type="checkbox" id="hideHigh"> Hide high-risk</label>
+    <input type="search" id="search" placeholder="Search symbol or name">
+  </div>
+</header>
+<main>
+  <div class="tablewrap">
+    <table>
+      <thead><tr><th>Score</th><th>Token</th><th>Chain</th><th>Age</th><th>Liquidity</th><th>Vol 1h</th><th>Buys/Sells 1h</th><th>Price 1h</th><th>Flags</th></tr></thead>
+      <tbody id="rows"></tbody>
+    </table>
+    <div class="empty" id="empty" hidden>No tokens match yet.</div>
+  </div>
+  <aside id="detail"><div class="empty">Select a token to see why it scored the way it did.</div></aside>
+</main>
+<div class="toasts" id="toasts"></div>
+
+<script>
+"use strict";
+// Token names/symbols come from the open internet: they are ALWAYS written with
+// textContent (never innerHTML) and links are checked to be http(s).
+const tokens = new Map();
+let selected = null;
+let dirty = false;
+
+const $ = (id) => document.getElementById(id);
+const el = (tag, cls, text) => {
+  const e = document.createElement(tag);
+  if (cls) e.className = cls;
+  if (text !== undefined) e.textContent = text;
+  return e;
+};
+
+function compact(n) {
+  if (!Number.isFinite(n)) return "-";
+  const a = Math.abs(n);
+  if (a >= 1e9) return (n / 1e9).toFixed(1) + "B";
+  if (a >= 1e6) return (n / 1e6).toFixed(1) + "M";
+  if (a >= 1e3) return (n / 1e3).toFixed(1) + "K";
+  return String(Math.round(n));
+}
+function age(ms) {
+  if (!Number.isFinite(ms)) return "?";
+  const m = Math.max(0, Math.round((Date.now() - ms) / 60000));
+  if (m < 60) return m + "m";
+  if (m < 1440) return Math.floor(m / 60) + "h";
+  return Math.floor(m / 1440) + "d";
+}
+function safeUrl(u) {
+  try { const p = new URL(u); return p.protocol === "http:" || p.protocol === "https:" ? p.href : null; }
+  catch { return null; }
+}
+
+function visible() {
+  const chain = $("chain").value;
+  const min = Number($("minScore").value);
+  const hideHigh = $("hideHigh").checked;
+  const q = $("search").value.trim().toLowerCase();
+  return [...tokens.values()]
+    .filter((t) => (!chain || t.chain === chain)
+      && t.result.score >= min
+      && (!hideHigh || !t.result.flags.some((f) => f.severity === "high"))
+      && (!q || (t.symbol + " " + t.name).toLowerCase().includes(q)))
+    .sort((a, b) => b.result.score - a.result.score || b.firstSeen - a.firstSeen)
+    .slice(0, 150);
+}
+
+function render() {
+  dirty = false;
+  const list = visible();
+  const rows = $("rows");
+  rows.replaceChildren();
+  $("empty").hidden = list.length > 0;
+  for (const t of list) {
+    const tr = el("tr", t.id === selected ? "sel" : "");
+    tr.addEventListener("click", () => { selected = t.id; renderDetail(); render(); });
+
+    const s = el("td"); s.append(el("span", "badge g" + t.result.grade, String(t.result.score)));
+    const name = el("td"); name.append(el("span", "sym", t.symbol), el("span", "nm", t.name));
+    const ch = t.priceChange?.h1;
+    const chCell = el("td", Number.isFinite(ch) ? (ch >= 0 ? "up" : "down") : "", Number.isFinite(ch) ? (ch >= 0 ? "+" : "") + ch.toFixed(0) + "%" : "-");
+    const bs = t.txns?.h1;
+    const flags = t.result.flags.filter((f) => f.severity !== "info").length;
+
+    tr.append(s, name, el("td", "", t.chain), el("td", "", age(t.createdAt)),
+      el("td", "", "$" + compact(t.liquidityUsd)), el("td", "", "$" + compact(t.volume?.h1)),
+      el("td", "", bs ? (bs.buys ?? 0) + " / " + (bs.sells ?? 0) : "-"), chCell,
+      el("td", flags ? "flagcount" : "", flags ? String(flags) : "-"));
+    rows.append(tr);
+  }
+}
+
+function renderDetail() {
+  const box = $("detail");
+  box.replaceChildren();
+  const t = tokens.get(selected);
+  if (!t) { box.append(el("div", "empty", "Select a token to see why it scored the way it did.")); return; }
+
+  const head = el("div");
+  head.append(el("span", "badge g" + t.result.grade, t.result.score + " / " + t.result.grade));
+  const h = el("h2", "", t.symbol + "  " + t.name);
+  h.style.marginTop = "8px";
+  box.append(head, h, el("div", "status", t.chain + " · " + (t.dex ?? "?")));
+
+  const link = safeUrl(t.url);
+  if (link) {
+    const a = el("a", "", "Open pair page");
+    a.href = link; a.target = "_blank"; a.rel = "noopener noreferrer";
+    box.append(a);
+  }
+
+  box.append(el("h3", "", "Flags"));
+  if (!t.result.flags.length) box.append(el("div", "note", "No flags raised."));
+  for (const f of t.result.flags) box.append(el("div", "flag " + f.severity, f.message));
+
+  box.append(el("h3", "", "Score breakdown"));
+  for (const f of t.result.factors) {
+    const row = el("div", "factor");
+    row.append(el("span", "", f.name), el("span", "", f.points + " / " + f.max));
+    const bar = el("div", "bar"); const fill = document.createElement("i");
+    fill.style.width = (f.max ? (f.points / f.max) * 100 : 0) + "%"; bar.append(fill);
+    row.append(bar, el("div", "note", f.note));
+    box.append(row);
+  }
+  box.append(el("div", "disclaimer", "Heuristic screen for research only. A high score does not make a token safe and this is not financial advice."));
+}
+
+function refreshChains() {
+  const sel = $("chain"); const cur = sel.value;
+  const chains = [...new Set([...tokens.values()].map((t) => t.chain))].sort();
+  sel.replaceChildren(el("option", "", "All")); sel.firstChild.value = "";
+  for (const c of chains) { const o = el("option", "", c); o.value = c; sel.append(o); }
+  sel.value = cur;
+}
+
+function toast(text) {
+  const t = el("div", "toast", text);
+  $("toasts").append(t);
+  setTimeout(() => t.remove(), 5000);
+}
+
+function setStatus(on, text) { $("dot").className = "dot" + (on ? " on" : ""); $("statusText").textContent = text; }
+
+const es = new EventSource("/api/events");
+es.addEventListener("snapshot", (e) => {
+  const d = JSON.parse(e.data);
+  tokens.clear(); for (const t of d.tokens) tokens.set(t.id, t);
+  setStatus(true, "live · source: " + d.source); refreshChains(); dirty = true;
+});
+for (const type of ["new", "update"]) es.addEventListener(type, (e) => {
+  const t = JSON.parse(e.data); tokens.set(t.id, t); dirty = true;
+  if (selected === t.id) renderDetail();
+});
+es.addEventListener("alert", (e) => { const t = JSON.parse(e.data); toast("New strong launch: " + t.symbol + " scored " + t.result.score); refreshChains(); });
+es.addEventListener("source-error", (e) => setStatus(true, "source error: " + JSON.parse(e.data)));
+es.onerror = () => setStatus(false, "disconnected, retrying...");
+
+for (const id of ["chain", "hideHigh", "search"]) $(id).addEventListener("input", () => { dirty = true; });
+$("minScore").addEventListener("input", () => { $("minScoreVal").textContent = $("minScore").value; dirty = true; });
+setInterval(() => { if (dirty) render(); }, 500);
+</script>
+</body>
+</html>

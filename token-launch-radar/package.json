@@ -1,0 +1,15 @@
+{
+  "name": "token-launch-radar",
+  "version": "1.0.0",
+  "description": "Live radar that scans brand-new token launches and scores them with a transparent, explainable risk model.",
+  "type": "module",
+  "license": "MIT",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "start": "node src/server.js",
+    "live": "node src/server.js --source=dexscreener",
+    "test": "node --test"
+  }
+}
